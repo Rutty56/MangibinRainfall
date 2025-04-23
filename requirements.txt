@@ -1,5 +1,5 @@
 python-dotenv
-line-bot-sdk
+line-bot-sdk==2.3.0
 schedule
 google-api-python-client
 google-auth
