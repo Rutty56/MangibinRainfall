@@ -7,12 +7,16 @@ from datetime import datetime
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
-from linebot import LineBotApi
+from linebot import LineBotApi, WebhookHandler
 from linebot.models import TextSendMessage, MessageEvent, TextMessage
+from linebot.exceptions import InvalidSignatureError
 from dotenv import load_dotenv
+from flask import Flask, request, abort
 
+# โหลด environment variables
 load_dotenv()
 LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
+LINE_CHANNEL_SECRET = os.getenv("LINE_CHANNEL_SECRET")
 FOLDER_ID = os.getenv("FOLDER_ID")
 SCOPES = ['https://www.googleapis.com/auth/drive.file']
 
@@ -25,18 +29,13 @@ credentials = service_account.Credentials.from_service_account_info(
     json.loads(SERVICE_ACCOUNT_INFO), scopes=SCOPES)
 
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
+handler = WebhookHandler(LINE_CHANNEL_SECRET)
+
+app = Flask(__name__)
 
 def get_registered_users():
-    """ ฟังก์ชันดึง user IDs จากไฟล์ """
-    if os.path.exists('registered_users.txt'):
-        with open('registered_users.txt', 'r') as f:
-            return f.read().split(',')
-    return []
-
-def save_registered_users(registered_users):
-    """ ฟังก์ชันบันทึก user IDs ไปยังไฟล์ """
-    with open('registered_users.txt', 'w') as f:
-        f.write(','.join(registered_users))
+    user_ids = os.getenv("REGISTERED_USER_IDS", "").split(",") if os.getenv("REGISTERED_USER_IDS") else []
+    return user_ids
 
 def fetch_weather_data():
     url = "https://data.tmd.go.th/api/WeatherToday/V2/?uid=api&ukey=api12345"
@@ -92,17 +91,18 @@ def register_user(user_id):
     registered_users = get_registered_users()
     if user_id not in registered_users:
         registered_users.append(user_id)
-        save_registered_users(registered_users)
+        os.environ["REGISTERED_USER_IDS"] = ",".join(registered_users)
         print(f"User {user_id} has been registered.")
     else:
         print(f"User {user_id} is already registered.")
 
+@handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     user_id = event.source.user_id
     text = event.message.text
 
-    if 'สมัคร' in text and 'บริการ' in text:
-        register_user(user_id) 
+    if text == 'สมัครขอรับบริการจ้า':
+        register_user(user_id)
         line_bot_api.reply_message(
             event.reply_token,
             TextSendMessage(text="คุณได้สมัครขอรับบริการแล้ว!")
@@ -123,3 +123,17 @@ def job():
     finally:
         if os.path.exists(filename):
             os.remove(filename)
+
+@app.route("/callback", methods=['POST'])
+def callback():
+    signature = request.headers['X-Line-Signature']
+    body = request.get_data(as_text=True)
+
+    try:
+        handler.handle(body, signature)
+    except InvalidSignatureError:
+        abort(400)
+    return 'OK'
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0",debug=True, port=5000)
