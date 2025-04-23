@@ -8,7 +8,7 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from linebot import LineBotApi
-from linebot.models import TextSendMessage
+from linebot.models import TextSendMessage, MessageEvent, TextMessage
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -27,8 +27,16 @@ credentials = service_account.Credentials.from_service_account_info(
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 
 def get_registered_users():
-    user_ids = os.getenv("REGISTERED_USER_IDS", "").split(",")
-    return user_ids
+    """ ฟังก์ชันดึง user IDs จากไฟล์ """
+    if os.path.exists('registered_users.txt'):
+        with open('registered_users.txt', 'r') as f:
+            return f.read().split(',')
+    return []
+
+def save_registered_users(registered_users):
+    """ ฟังก์ชันบันทึก user IDs ไปยังไฟล์ """
+    with open('registered_users.txt', 'w') as f:
+        f.write(','.join(registered_users))
 
 def fetch_weather_data():
     url = "https://data.tmd.go.th/api/WeatherToday/V2/?uid=api&ukey=api12345"
@@ -79,6 +87,26 @@ def send_to_registered_users(message):
             line_bot_api.push_message(user_id, TextSendMessage(text=message))
         except Exception as e:
             print(f"Error sending message to {user_id}: {e}")
+
+def register_user(user_id):
+    registered_users = get_registered_users()
+    if user_id not in registered_users:
+        registered_users.append(user_id)
+        save_registered_users(registered_users)
+        print(f"User {user_id} has been registered.")
+    else:
+        print(f"User {user_id} is already registered.")
+
+def handle_message(event):
+    user_id = event.source.user_id
+    text = event.message.text
+
+    if 'สมัคร' in text and 'บริการ' in text:
+        register_user(user_id) 
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="คุณได้สมัครขอรับบริการแล้ว!")
+        )
 
 def job():
     now = datetime.now()
