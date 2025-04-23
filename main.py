@@ -1,3 +1,4 @@
+import json
 import os
 import requests
 import xml.etree.ElementTree as ET
@@ -8,48 +9,55 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from linebot import LineBotApi
 from linebot.models import TextSendMessage
-import schedule
-import time
 from dotenv import load_dotenv
 
 load_dotenv()
 LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
 FOLDER_ID = os.getenv("FOLDER_ID")
 SCOPES = ['https://www.googleapis.com/auth/drive.file']
-SERVICE_ACCOUNT_FILE = 'credentials.json'
+
+SERVICE_ACCOUNT_INFO = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
+
+if SERVICE_ACCOUNT_INFO is None:
+    raise ValueError("GOOGLE_SERVICE_ACCOUNT_JSON is not set in the environment variables")
+
+credentials = service_account.Credentials.from_service_account_info(
+    json.loads(SERVICE_ACCOUNT_INFO), scopes=SCOPES)
+
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 
 def get_registered_users():
-    try:
-        with open("registered_users.txt", "r", encoding="utf-8") as f:
-            return [line.strip() for line in f if line.strip()]
-    except FileNotFoundError:
-        return []
+    user_ids = os.getenv("REGISTERED_USER_IDS", "").split(",")
+    return user_ids
 
 def fetch_weather_data():
     url = "https://data.tmd.go.th/api/WeatherToday/V2/?uid=api&ukey=api12345"
     response = requests.get(url)
-    return response.content
+    if response.status_code == 200:
+        return response.content
+    else:
+        raise Exception(f"Error fetching weather data: {response.status_code}")
 
 def parse_and_save_csv(xml_data, filename):
-    root = ET.fromstring(xml_data)
-    stations = root.findall(".//Station")
-    all_tags = set()
-    for station in stations:
-        for elem in station:
-            all_tags.add(elem.tag)
-    fieldnames = sorted(list(all_tags))
-
-    with open(filename, mode='w', newline='', encoding='utf-8') as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-        writer.writeheader()
+    try:
+        root = ET.fromstring(xml_data)
+        stations = root.findall(".//Station")
+        all_tags = set()
         for station in stations:
-            row = {tag: station.findtext(tag) for tag in fieldnames}
-            writer.writerow(row)
+            for elem in station:
+                all_tags.add(elem.tag)
+        fieldnames = sorted(list(all_tags))
+
+        with open(filename, mode='w', newline='', encoding='utf-8') as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+            for station in stations:
+                row = {tag: station.findtext(tag) for tag in fieldnames}
+                writer.writerow(row)
+    except Exception as e:
+        raise Exception(f"Error parsing XML data: {e}")
 
 def upload_to_drive(filename):
-    credentials = service_account.Credentials.from_service_account_file(
-        SERVICE_ACCOUNT_FILE, scopes=SCOPES)
     service = build('drive', 'v3', credentials=credentials)
     file_metadata = {
         'name': os.path.basename(filename),
@@ -67,23 +75,23 @@ def upload_to_drive(filename):
 def send_to_registered_users(message):
     user_ids = get_registered_users()
     for user_id in user_ids:
-        line_bot_api.push_message(user_id, TextSendMessage(text=message))
+        try:
+            line_bot_api.push_message(user_id, TextSendMessage(text=message))
+        except Exception as e:
+            print(f"Error sending message to {user_id}: {e}")
 
 def job():
     now = datetime.now()
     timestamp = now.strftime("%Y-%m-%d_%H-%M")
     filename = f"weather_{timestamp}.csv"
-    xml_data = fetch_weather_data()
-    parse_and_save_csv(xml_data, filename)
-    file_url = upload_to_drive(filename)
-    message = f"⛅ รายงานสภาพอากาศประจำวันที่ {now.strftime('%Y-%m-%d %H:%M')}\n📁 ดาวน์โหลด CSV: {file_url}"
-    send_to_registered_users(message)
-    os.remove(filename)
-
-schedule.every().day.at("08:00").do(job)
-schedule.every().day.at("12:00").do(job)
-
-print("LINE Bot Weather CSV Service is running...")
-while True:
-    schedule.run_pending()
-    time.sleep(60)
+    try:
+        xml_data = fetch_weather_data()
+        parse_and_save_csv(xml_data, filename)
+        file_url = upload_to_drive(filename)
+        message = f"⛅ รายงานสภาพอากาศประจำวันที่ {now.strftime('%Y-%m-%d %H:%M')}\n📁 ดาวน์โหลด CSV: {file_url}"
+        send_to_registered_users(message)
+    except Exception as e:
+        print(f"Error occurred: {e}")
+    finally:
+        if os.path.exists(filename):
+            os.remove(filename)
