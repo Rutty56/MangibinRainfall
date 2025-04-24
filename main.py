@@ -13,15 +13,15 @@ from linebot.exceptions import InvalidSignatureError
 from dotenv import load_dotenv
 from flask import Flask, request, abort
 
-# โหลด environment variables
 load_dotenv()
+
 LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
 LINE_CHANNEL_SECRET = os.getenv("LINE_CHANNEL_SECRET")
 FOLDER_ID = os.getenv("FOLDER_ID")
 SCOPES = ['https://www.googleapis.com/auth/drive.file']
+REGISTERED_USER_FILE = "registered_users.txt"
 
 SERVICE_ACCOUNT_INFO = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
-
 if SERVICE_ACCOUNT_INFO is None:
     raise ValueError("GOOGLE_SERVICE_ACCOUNT_JSON is not set in the environment variables")
 
@@ -34,8 +34,27 @@ handler = WebhookHandler(LINE_CHANNEL_SECRET)
 app = Flask(__name__)
 
 def get_registered_users():
-    user_ids = os.getenv("REGISTERED_USER_IDS", "").split(",") if os.getenv("REGISTERED_USER_IDS") else []
-    return user_ids
+    if not os.path.exists(REGISTERED_USER_FILE):
+        return []
+    with open(REGISTERED_USER_FILE, "r", encoding="utf-8") as f:
+        return [line.strip() for line in f if line.strip()]
+
+def register_user(user_id):
+    users = get_registered_users()
+    if user_id not in users:
+        with open(REGISTERED_USER_FILE, "a", encoding="utf-8") as f:
+            f.write(f"{user_id}\n")
+        print(f"User {user_id} registered.")
+    else:
+        print(f"User {user_id} already registered.")
+
+def unregister_user(user_id):
+    users = get_registered_users()
+    if user_id in users:
+        users.remove(user_id)
+        with open(REGISTERED_USER_FILE, "w", encoding="utf-8") as f:
+            f.writelines(f"{uid}\n" for uid in users)
+        print(f"User {user_id} unregistered.")
 
 def fetch_weather_data():
     url = "https://data.tmd.go.th/api/WeatherToday/V2/?uid=api&ukey=api12345"
@@ -87,25 +106,22 @@ def send_to_registered_users(message):
         except Exception as e:
             print(f"Error sending message to {user_id}: {e}")
 
-def register_user(user_id):
-    registered_users = get_registered_users()
-    if user_id not in registered_users:
-        registered_users.append(user_id)
-        os.environ["REGISTERED_USER_IDS"] = ",".join(registered_users)
-        print(f"User {user_id} has been registered.")
-    else:
-        print(f"User {user_id} is already registered.")
-
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     user_id = event.source.user_id
-    text = event.message.text
+    text = event.message.text.strip()
 
-    if text == 'สมัครขอรับบริการจ้า':
+    if text == 'สมัครรับบริการ':
         register_user(user_id)
         line_bot_api.reply_message(
             event.reply_token,
-            TextSendMessage(text="คุณได้สมัครขอรับบริการแล้ว!")
+            TextSendMessage(text="คุณได้สมัครขอรับบริการแล้ว! ✅")
+        )
+    elif text == 'ยกเลิกสมัคร':
+        unregister_user(user_id)
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="คุณได้ยกเลิกการรับบริการแล้ว 😢")
         )
 
 def job():
@@ -124,6 +140,10 @@ def job():
         if os.path.exists(filename):
             os.remove(filename)
 
+@app.route("/", methods=["GET"])
+def health_check():
+    return "LINE Bot is running."
+
 @app.route("/callback", methods=['POST'])
 def callback():
     signature = request.headers['X-Line-Signature']
@@ -136,4 +156,5 @@ def callback():
     return 'OK'
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0",debug=True, port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
