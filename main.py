@@ -111,17 +111,24 @@ def handle_message(event):
     user_id = event.source.user_id
     text = event.message.text.strip()
 
+    print(f"Received message: {text}")
+
     if text == 'สมัครรับบริการ':
-        register_user(user_id)
+        register_user(user_id) 
         line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text="คุณได้สมัครขอรับบริการแล้ว! ✅")
+            event.reply_token, 
+            TextSendMessage(text="คุณได้สมัครขอรับบริการแล้ว! ✅") 
         )
     elif text == 'ยกเลิกสมัคร':
-        unregister_user(user_id)
+        unregister_user(user_id) 
         line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text="คุณได้ยกเลิกการรับบริการแล้ว 😢")
+            event.reply_token, 
+            TextSendMessage(text="คุณได้ยกเลิกการรับบริการแล้ว 😢") 
+        )
+    else:
+        line_bot_api.reply_message(
+            event.reply_token, 
+            TextSendMessage(text="กรุณาพิมพ์คำสั่งที่ถูกต้อง เช่น 'สมัครรับบริการ' หรือ 'ยกเลิกสมัคร'") 
         )
 
 def job():
