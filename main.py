@@ -117,13 +117,13 @@ def handle_message(event):
         register_user(user_id) 
         line_bot_api.reply_message(
             event.reply_token, 
-            TextSendMessage(text="คุณได้สมัครขอรับบริการแล้ว! ✅") 
+            TextSendMessage(text="คุณแม่ได้สมัครขอรับบริการแล้ว! ✅") 
         )
     elif text == 'ยกเลิกสมัคร':
         unregister_user(user_id) 
         line_bot_api.reply_message(
             event.reply_token, 
-            TextSendMessage(text="คุณได้ยกเลิกการรับบริการแล้ว 😢") 
+            TextSendMessage(text="คุณแม่ได้ยกเลิกการรับบริการแล้ว 😢") 
         )
     else:
         line_bot_api.reply_message(
