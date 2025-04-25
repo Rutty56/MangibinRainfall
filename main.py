@@ -115,7 +115,7 @@ def upload_to_drive(filename):
         fileId=file_id,
         body={"type": "anyone", "role": "reader"},
     ).execute()
-    return f"https://drive.google.com/drive/folders/{file_id}/view?usp=sharing"
+    return f"https://drive.google.com/file/d/{file_id}/view?usp=sharing"
 
 def send_to_registered_users(message):
     user_ids = get_registered_users()
@@ -166,7 +166,7 @@ def handle_message(event):
         )
     elif text == 'ดึงข้อมูล':
         now = datetime.now()
-        timestamp = now.strftime("%Y-%m-%d_%H-%M")
+        timestamp = now.strftime("%Y-%m-%d_%H-%M-%S")
         filename = f"weather_{timestamp}.csv"
         try:
             xml_data = fetch_weather_data()
