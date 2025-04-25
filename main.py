@@ -12,6 +12,7 @@ from linebot.models import TextSendMessage, MessageEvent, TextMessage
 from linebot.exceptions import InvalidSignatureError
 from dotenv import load_dotenv
 from flask import Flask, request, abort
+from datetime import datetime, timedelta, timezone
 
 load_dotenv()
 
@@ -165,7 +166,8 @@ def handle_message(event):
             TextSendMessage(text=reply)
         )
     elif text == 'ดึงข้อมูล':
-        now = datetime.now()
+        bangkok_tz = timezone(timedelta(hours=7))
+        now = datetime.now(bangkok_tz)
         timestamp = now.strftime("%Y-%m-%d_%H-%M-%S")
         filename = f"weather_{timestamp}.csv"
         try:
