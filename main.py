@@ -107,7 +107,6 @@ def send_to_registered_users(message):
             print(f"Error sending message to {user_id}: {e}")
 
 def count_stations_in_weather_data():
-    """ นับจำนวนสถานีจาก API และคืนค่าจำนวนสถานี """
     try:
         xml_data = fetch_weather_data()
         root = ET.fromstring(xml_data)
@@ -146,27 +145,30 @@ def handle_message(event):
             event.reply_token,
             TextSendMessage(text=reply)
         )
+    elif text == 'ดึงข้อมูล':
+        now = datetime.now()
+        timestamp = now.strftime("%Y-%m-%d_%H-%M")
+        filename = f"weather_{timestamp}.csv"
+        try:
+            xml_data = fetch_weather_data()
+            parse_and_save_csv(xml_data, filename)
+            file_url = upload_to_drive(filename)
+            reply = f"✅ ดึงข้อมูลเรียบร้อยแล้ว!\n📁 ดาวน์โหลดไฟล์ CSV ได้ที่: {file_url}"
+        except Exception as e:
+            reply = f"❌ เกิดข้อผิดพลาดในการดึงข้อมูล: {e}"
+        finally:
+            if os.path.exists(filename):
+                os.remove(filename)
+
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=reply)
+        )
     else:
         line_bot_api.reply_message(
             event.reply_token, 
-            TextSendMessage(text="กรุณาพิมพ์คำสั่งที่ถูกต้อง เช่น 'สมัครรับบริการ' หรือ 'ยกเลิกสมัคร' หรือ 'เช็คข้อมูล'") 
+            TextSendMessage(text="กรุณาพิมพ์คำสั่งที่ถูกต้อง เช่น 'สมัครรับบริการ' หรือ 'ยกเลิกสมัคร' หรือ 'เช็คข้อมูล' หรือ 'ดึงข้อมูล'") 
         )
-
-def job():
-    now = datetime.now()
-    timestamp = now.strftime("%Y-%m-%d_%H-%M")
-    filename = f"weather_{timestamp}.csv"
-    try:
-        xml_data = fetch_weather_data()
-        parse_and_save_csv(xml_data, filename)
-        file_url = upload_to_drive(filename)
-        message = f"⛅ รายงานสภาพอากาศประจำวันที่ {now.strftime('%Y-%m-%d %H:%M')}\n📁 ดาวน์โหลด CSV: {file_url}"
-        send_to_registered_users(message)
-    except Exception as e:
-        print(f"Error occurred: {e}")
-    finally:
-        if os.path.exists(filename):
-            os.remove(filename)
 
 @app.route("/", methods=["GET"])
 def health_check():
