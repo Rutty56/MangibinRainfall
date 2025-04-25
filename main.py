@@ -64,21 +64,40 @@ def fetch_weather_data():
     else:
         raise Exception(f"Error fetching weather data: {response.status_code}")
 
+def extract_all_fields(elem, prefix=""):
+    data = {}
+    for child in elem:
+        tag = child.tag
+        key_prefix = f"{prefix}{tag}" if prefix == "" else f"{prefix}_{tag}"
+
+        for attr_key, attr_val in child.attrib.items():
+            data[f"{key_prefix}_{attr_key}"] = attr_val
+
+        if child.text and child.text.strip():
+            data[key_prefix] = child.text.strip()
+
+        data.update(extract_all_fields(child, key_prefix))
+    return data
+
 def parse_and_save_csv(xml_data, filename):
     try:
         root = ET.fromstring(xml_data)
         stations = root.findall(".//Station")
-        all_tags = set()
+
+        all_fields = set()
+        rows = []
+
         for station in stations:
-            for elem in station:
-                all_tags.add(elem.tag)
-        fieldnames = sorted(list(all_tags))
+            station_data = extract_all_fields(station)
+            all_fields.update(station_data.keys())
+            rows.append(station_data)
+
+        fieldnames = sorted(all_fields)
 
         with open(filename, mode='w', newline='', encoding='utf-8') as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
-            for station in stations:
-                row = {tag: station.findtext(tag) for tag in fieldnames}
+            for row in rows:
                 writer.writerow(row)
     except Exception as e:
         raise Exception(f"Error parsing XML data: {e}")
@@ -124,16 +143,16 @@ def handle_message(event):
     print(f"Received message: {text}")
 
     if text == 'สมัครรับบริการ':
-        register_user(user_id) 
+        register_user(user_id)
         line_bot_api.reply_message(
-            event.reply_token, 
-            TextSendMessage(text="คุณได้สมัครขอรับบริการแล้ว! ✅") 
+            event.reply_token,
+            TextSendMessage(text="คุณได้สมัครขอรับบริการแล้ว! ✅")
         )
     elif text == 'ยกเลิกสมัคร':
-        unregister_user(user_id) 
+        unregister_user(user_id)
         line_bot_api.reply_message(
-            event.reply_token, 
-            TextSendMessage(text="คุณได้ยกเลิกการรับบริการแล้ว 😢") 
+            event.reply_token,
+            TextSendMessage(text="คุณได้ยกเลิกการรับบริการแล้ว 😢")
         )
     elif text == 'เช็คข้อมูล':
         count = count_stations_in_weather_data()
@@ -166,8 +185,8 @@ def handle_message(event):
         )
     else:
         line_bot_api.reply_message(
-            event.reply_token, 
-            TextSendMessage(text="กรุณาพิมพ์คำสั่งที่ถูกต้อง เช่น 'สมัครรับบริการ' หรือ 'ยกเลิกสมัคร' หรือ 'เช็คข้อมูล' หรือ 'ดึงข้อมูล'") 
+            event.reply_token,
+            TextSendMessage(text="กรุณาพิมพ์คำสั่งที่ถูกต้อง เช่น 'สมัครรับบริการ' หรือ 'ยกเลิกสมัคร' หรือ 'เช็คข้อมูล' หรือ 'ดึงข้อมูล'")
         )
 
 @app.route("/", methods=["GET"])
