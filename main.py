@@ -96,7 +96,7 @@ def upload_to_drive(filename):
         fileId=file_id,
         body={"type": "anyone", "role": "reader"},
     ).execute()
-    return f"https://drive.google.com/file/d/{file_id}/view?usp=sharing"
+    return f"https://drive.google.com/drive/folders/{file_id}/view?usp=sharing"
 
 def send_to_registered_users(message):
     user_ids = get_registered_users()
