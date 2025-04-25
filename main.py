@@ -106,6 +106,17 @@ def send_to_registered_users(message):
         except Exception as e:
             print(f"Error sending message to {user_id}: {e}")
 
+def count_stations_in_weather_data():
+    """ นับจำนวนสถานีจาก API และคืนค่าจำนวนสถานี """
+    try:
+        xml_data = fetch_weather_data()
+        root = ET.fromstring(xml_data)
+        stations = root.findall(".//Station")
+        return len(stations)
+    except Exception as e:
+        print(f"Error counting stations: {e}")
+        return None
+
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     user_id = event.source.user_id
@@ -117,18 +128,28 @@ def handle_message(event):
         register_user(user_id) 
         line_bot_api.reply_message(
             event.reply_token, 
-            TextSendMessage(text="คุณแม่ได้สมัครขอรับบริการแล้ว! ✅") 
+            TextSendMessage(text="คุณได้สมัครขอรับบริการแล้ว! ✅") 
         )
     elif text == 'ยกเลิกสมัคร':
         unregister_user(user_id) 
         line_bot_api.reply_message(
             event.reply_token, 
-            TextSendMessage(text="คุณแม่ได้ยกเลิกการรับบริการแล้ว 😢") 
+            TextSendMessage(text="คุณได้ยกเลิกการรับบริการแล้ว 😢") 
+        )
+    elif text == 'เช็คข้อมูล':
+        count = count_stations_in_weather_data()
+        if count is not None:
+            reply = f"📡 ขณะนี้มีข้อมูลจากทั้งหมด {count} สถานีครับ"
+        else:
+            reply = "เกิดข้อผิดพลาดในการดึงข้อมูลสถานี 😢"
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=reply)
         )
     else:
         line_bot_api.reply_message(
             event.reply_token, 
-            TextSendMessage(text="กรุณาพิมพ์คำสั่งที่ถูกต้อง เช่น 'สมัครรับบริการ' หรือ 'ยกเลิกสมัคร'") 
+            TextSendMessage(text="กรุณาพิมพ์คำสั่งที่ถูกต้อง เช่น 'สมัครรับบริการ' หรือ 'ยกเลิกสมัคร' หรือ 'เช็คข้อมูล'") 
         )
 
 def job():
