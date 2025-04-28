@@ -3,7 +3,7 @@ import os
 import requests
 import xml.etree.ElementTree as ET
 import csv
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
@@ -12,7 +12,7 @@ from linebot.models import TextSendMessage, MessageEvent, TextMessage
 from linebot.exceptions import InvalidSignatureError
 from dotenv import load_dotenv
 from flask import Flask, request, abort
-from datetime import datetime, timedelta, timezone
+from apscheduler.schedulers.background import BackgroundScheduler
 
 load_dotenv()
 
@@ -33,6 +33,7 @@ line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
 app = Flask(__name__)
+
 
 def get_registered_users():
     if not os.path.exists(REGISTERED_USER_FILE):
@@ -136,6 +137,28 @@ def count_stations_in_weather_data():
         print(f"Error counting stations: {e}")
         return None
 
+
+def send_daily_weather_update():
+    print("Running scheduled weather update...")
+    bangkok_tz = timezone(timedelta(hours=7))
+    now = datetime.now(bangkok_tz)
+    timestamp = now.strftime("%Y-%m-%d_%H-%M-%S")
+    filename = f"weather_{timestamp}.csv"
+
+    try:
+        xml_data = fetch_weather_data()
+        parse_and_save_csv(xml_data, filename)
+        file_url = upload_to_drive(filename)
+        message = f"🌤️ อัปเดตสภาพอากาศประจำวันที่ {now.strftime('%d/%m/%Y')} ครับ\n📂 ดาวน์โหลดไฟล์: {file_url}"
+    except Exception as e:
+        message = f"❌ ข้อผิดพลาดในการอัปเดตสภาพอากาศ: {e}"
+    finally:
+        if os.path.exists(filename):
+            os.remove(filename)
+
+    send_to_registered_users(message)
+
+
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     user_id = event.source.user_id
@@ -174,7 +197,7 @@ def handle_message(event):
             xml_data = fetch_weather_data()
             parse_and_save_csv(xml_data, filename)
             file_url = upload_to_drive(filename)
-            reply = f"✅ ดึงข้อมูลเรียบร้อยแล้ว!\n📁 ดาวน์โหลดไฟล์ CSV ได้ที่: {file_url}"
+            reply = f"✅ ดึงข้อมูลเรียบร้อยแล้ว!\n📂 ดาวน์โหลดไฟล์ CSV ได้ที่: {file_url}"
         except Exception as e:
             reply = f"❌ เกิดข้อผิดพลาดในการดึงข้อมูล: {e}"
         finally:
@@ -191,6 +214,7 @@ def handle_message(event):
             TextSendMessage(text="กรุณาพิมพ์คำสั่งที่ถูกต้อง เช่น 'สมัครรับบริการ' หรือ 'ยกเลิกสมัคร' หรือ 'เช็คข้อมูล' หรือ 'ดึงข้อมูล'")
         )
 
+
 @app.route("/", methods=["GET"])
 def health_check():
     return "LINE Bot is running."
@@ -206,6 +230,11 @@ def callback():
         abort(400)
     return 'OK'
 
+
 if __name__ == "__main__":
+    scheduler = BackgroundScheduler(timezone="Asia/Bangkok")
+    scheduler.add_job(send_daily_weather_update, 'cron', hour=8, minute=0)
+    scheduler.start()
+
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
