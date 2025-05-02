@@ -165,15 +165,15 @@ def handle_message(event):
     elif text == 'ยกเลิกสมัคร':
         unregister_user(user_id)
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text="คุณได้ยกเลิกการรับบริการแล้ว 😢"))
-    elif text == 'ขอแผนที่ฝน':
+    elif text == 'แผนที่':
         try:
             generate_rainfall_map() 
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="แผนที่ฝนถูกสร้างเรียบร้อยแล้ว!"))
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="แผนที่ถูกสร้างเรียบร้อยแล้ว!"))
         except Exception as e:
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"❌ เกิดข้อผิดพลาด: {e}"))
     else:
         line_bot_api.reply_message(event.reply_token, TextSendMessage(
-            text="กรุณาพิมพ์คำสั่งที่ถูกต้อง เช่น 'สมัครรับบริการ', 'ยกเลิกสมัคร', หรือ 'ขอแผนที่ฝน'"
+            text="กรุณาพิมพ์คำสั่งที่ถูกต้อง เช่น 'สมัครรับบริการ', 'ยกเลิกสมัคร', หรือ 'แผนที่'"
         ))
 
 @app.route("/", methods=["GET"])
