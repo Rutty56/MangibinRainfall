@@ -3,6 +3,8 @@ import os
 import requests
 import xml.etree.ElementTree as ET
 import csv
+import folium
+from folium.plugins import MarkerCluster
 from datetime import datetime, timedelta, timezone
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -18,7 +20,7 @@ load_dotenv()
 LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
 LINE_CHANNEL_SECRET = os.getenv("LINE_CHANNEL_SECRET")
 FOLDER_ID = os.getenv("FOLDER_ID")
-WEATHER_TRIGGER_KEY = os.getenv("WEATHER_TRIGGER_KEY") 
+WEATHER_TRIGGER_KEY = os.getenv("WEATHER_TRIGGER_KEY")
 SCOPES = ['https://www.googleapis.com/auth/drive.file']
 REGISTERED_USER_FILE = "registered_users.txt"
 
@@ -34,13 +36,11 @@ handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
 app = Flask(__name__)
 
-
 def get_registered_users():
     if not os.path.exists(REGISTERED_USER_FILE):
         return []
     with open(REGISTERED_USER_FILE, "r", encoding="utf-8") as f:
         return [line.strip() for line in f if line.strip()]
-
 
 def register_user(user_id):
     users = get_registered_users()
@@ -51,7 +51,6 @@ def register_user(user_id):
     else:
         print(f"User {user_id} already registered.")
 
-
 def unregister_user(user_id):
     users = get_registered_users()
     if user_id in users:
@@ -60,7 +59,6 @@ def unregister_user(user_id):
             f.writelines(f"{uid}\n" for uid in users)
         print(f"User {user_id} unregistered.")
 
-
 def fetch_weather_data():
     url = "https://data.tmd.go.th/api/WeatherToday/V2/?uid=api&ukey=api12345"
     response = requests.get(url)
@@ -68,7 +66,6 @@ def fetch_weather_data():
         return response.content
     else:
         raise Exception(f"Error fetching weather data: {response.status_code}")
-
 
 def extract_all_fields(elem, prefix=""):
     data = {}
@@ -82,40 +79,56 @@ def extract_all_fields(elem, prefix=""):
         data.update(extract_all_fields(child, key_prefix))
     return data
 
-
-def parse_and_save_csv(xml_data, filename):
+def create_rainfall_map(xml_data):
     try:
+        map_center = [13.7563, 100.5018]
+        m = folium.Map(location=map_center, zoom_start=7)
+
+        marker_cluster = MarkerCluster().add_to(m)
+
         root = ET.fromstring(xml_data)
         stations = root.findall(".//Station")
-        all_fields = set()
-        rows = []
+
         for station in stations:
-            station_data = extract_all_fields(station)
-            all_fields.update(station_data.keys())
-            rows.append(station_data)
+            data = extract_all_fields(station)
+            station_name = data.get("StationNameThai", "ไม่ทราบสถานี")
+            latitude = float(data.get("Latitude", 0))
+            longitude = float(data.get("Longitude", 0))
+            rainfall = float(data.get("Observation_Rainfall", 0))
 
-        priority_fields = ['WmoStationNumber', 'Observation_Rainfall', 'Observation_Rainfall_Unit']
-        remaining_fields = sorted(f for f in all_fields if f not in priority_fields)
-        fieldnames = priority_fields + remaining_fields
+            color = "blue"
+            if rainfall > 100:
+                color = "red"
+            elif rainfall > 50:
+                color = "orange"
+            elif rainfall > 20:
+                color = "green"
 
-        with open(filename, mode='w', newline='', encoding='utf-8') as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-            writer.writeheader()
-            for row in rows:
-                writer.writerow(row)
+            folium.CircleMarker(
+                location=[latitude, longitude],
+                radius=8,
+                color=color,
+                fill=True,
+                fill_color=color,
+                fill_opacity=0.6,
+                popup=f"{station_name} - {rainfall} มม."
+            ).add_to(marker_cluster)
+
+        map_filename = "rainfall_map.html"
+        m.save(map_filename)
+        print(f"แผนที่ฝนถูกบันทึกเป็นไฟล์: {map_filename}")
+
     except Exception as e:
-        raise Exception(f"Error parsing XML data: {e}")
-
+        print(f"เกิดข้อผิดพลาดในการสร้างแผนที่ฝน: {e}")
 
 def upload_to_drive(filename):
     service = build('drive', 'v3', credentials=credentials)
     file_metadata = {'name': os.path.basename(filename), 'parents': [FOLDER_ID]}
-    media = MediaFileUpload(filename, mimetype='text/csv')
+    media = MediaFileUpload(filename, mimetype='text/html')
     file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
     file_id = file.get('id')
     service.permissions().create(fileId=file_id, body={"type": "anyone", "role": "reader"}).execute()
     return f"https://drive.google.com/file/d/{file_id}/view?usp=sharing"
-
 
 def send_to_registered_users(message):
     user_ids = get_registered_users()
@@ -127,36 +140,19 @@ def send_to_registered_users(message):
         except Exception as e:
             print(f"Error sending message to {user_id}: {e}")
 
-
-def count_stations_in_weather_data():
+def generate_rainfall_map():
     try:
-        xml_data = fetch_weather_data()
-        root = ET.fromstring(xml_data)
-        stations = root.findall(".//Station")
-        return len(stations)
+        xml_data = fetch_weather_data() 
+        create_rainfall_map(xml_data) 
+        upload_map_to_drive()  
     except Exception as e:
-        print(f"Error counting stations: {e}")
-        return None
+        print(f"เกิดข้อผิดพลาดในการสร้างแผนที่ฝน: {e}")
 
-
-def send_daily_weather_update():
-    print("✅ Running scheduled weather update...")
-    bangkok_tz = timezone(timedelta(hours=7))
-    now = datetime.now(bangkok_tz)
-    timestamp = now.strftime("%Y-%m-%d_%H-%M-%S")
-    filename = f"weather_{timestamp}.csv"
-    try:
-        xml_data = fetch_weather_data()
-        parse_and_save_csv(xml_data, filename)
-        file_url = upload_to_drive(filename)
-        message = f"🌤️ อัปเดตสภาพอากาศประจำวันที่ {now.strftime('%d/%m/%Y')} ครับ\n📂 ดาวน์โหลดไฟล์: {file_url}"
-    except Exception as e:
-        message = f"❌ ข้อผิดพลาดในการอัปเดตสภาพอากาศ: {e}"
-    finally:
-        if os.path.exists(filename):
-            os.remove(filename)
-    send_to_registered_users(message)
-
+def upload_map_to_drive():
+    map_filename = "rainfall_map.html"
+    file_url = upload_to_drive(map_filename) 
+    message = f"📍 ดูแผนที่ฝนที่นี่: {file_url}"
+    send_to_registered_users(message) 
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
@@ -169,36 +165,20 @@ def handle_message(event):
     elif text == 'ยกเลิกสมัคร':
         unregister_user(user_id)
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text="คุณได้ยกเลิกการรับบริการแล้ว 😢"))
-    elif text == 'เช็คข้อมูล':
-        count = count_stations_in_weather_data()
-        reply = f"📡 ขณะนี้มีข้อมูลจากทั้งหมด {count} สถานีครับ" if count else "เกิดข้อผิดพลาดในการดึงข้อมูลสถานี 😢"
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
-    elif text == 'ดึงข้อมูล':
-        bangkok_tz = timezone(timedelta(hours=7))
-        now = datetime.now(bangkok_tz)
-        timestamp = now.strftime("%Y-%m-%d_%H-%M-%S")
-        filename = f"weather_{timestamp}.csv"
+    elif text == 'ขอแผนที่ฝน':
         try:
-            xml_data = fetch_weather_data()
-            parse_and_save_csv(xml_data, filename)
-            file_url = upload_to_drive(filename)
-            reply = f"✅ ดึงข้อมูลเรียบร้อยแล้ว!\n📂 ดาวน์โหลดไฟล์ CSV ได้ที่: {file_url}"
+            generate_rainfall_map() 
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="แผนที่ฝนถูกสร้างเรียบร้อยแล้ว!"))
         except Exception as e:
-            reply = f"❌ เกิดข้อผิดพลาดในการดึงข้อมูล: {e}"
-        finally:
-            if os.path.exists(filename):
-                os.remove(filename)
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"❌ เกิดข้อผิดพลาด: {e}"))
     else:
         line_bot_api.reply_message(event.reply_token, TextSendMessage(
-            text="กรุณาพิมพ์คำสั่งที่ถูกต้อง เช่น 'สมัครรับบริการ', 'ยกเลิกสมัคร', 'เช็คข้อมูล', หรือ 'ดึงข้อมูล'"
+            text="กรุณาพิมพ์คำสั่งที่ถูกต้อง เช่น 'สมัครรับบริการ', 'ยกเลิกสมัคร', หรือ 'ขอแผนที่ฝน'"
         ))
-
 
 @app.route("/", methods=["GET"])
 def health_check():
     return "LINE Bot is running."
-
 
 @app.route("/callback", methods=['POST'])
 def callback():
@@ -211,14 +191,12 @@ def callback():
         abort(400)
     return 'OK'
 
-
 @app.route("/trigger-weather", methods=["GET"])
 def trigger_weather():
     if request.args.get("key") != WEATHER_TRIGGER_KEY:
         return "❌ Unauthorized", 403
-    send_daily_weather_update()
+    generate_rainfall_map()
     return "✅ Triggered weather update"
-
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
