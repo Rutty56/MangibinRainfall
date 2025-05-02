@@ -94,7 +94,7 @@ def parse_and_save_csv(xml_data, filename):
             all_fields.update(station_data.keys())
             rows.append(station_data)
 
-        fieldnames = sorted(all_fields)
+        fieldnames = sorted(all_fields, reverse=True)
 
         with open(filename, mode='w', newline='', encoding='utf-8') as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
