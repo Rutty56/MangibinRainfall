@@ -9,3 +9,4 @@ line-bot-sdk==2.3.0
 apscheduler
 folium
 beautifulsoup4
+lxml
