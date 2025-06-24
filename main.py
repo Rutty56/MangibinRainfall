@@ -13,6 +13,9 @@ from linebot.models import TextSendMessage, MessageEvent, TextMessage
 from linebot.exceptions import InvalidSignatureError
 from dotenv import load_dotenv
 from flask import Flask, request, abort
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.common.exceptions import WebDriverException
 
 load_dotenv()
 
@@ -62,13 +65,26 @@ def fetch_weather_data_with_retry(retries=3, wait_seconds=3):
     url = "https://data.tmd.go.th/api/WeatherToday/V2/?uid=api&ukey=api12345"
     for attempt in range(retries):
         try:
-            response = requests.get(url, timeout=60)
-            if response.status_code == 200:
-                return response.content
+            options = Options()
+            options.add_argument("--headless")
+            options.add_argument("--disable-gpu")
+            options.add_argument("--no-sandbox")
+            options.add_argument("--disable-dev-shm-usage")
+
+            driver = webdriver.Chrome(options=options)
+            driver.set_page_load_timeout(60)
+            driver.get(url)
+            time.sleep(5)  # ให้เวลา JS โหลด
+
+            page_source = driver.page_source
+            driver.quit()
+
+            if "<Station" in page_source:
+                return page_source.encode("utf-8")  # กลับเป็น bytes เพื่อใช้ต่อใน ET.fromstring
             else:
-                print(f"Attempt {attempt+1}: HTTP {response.status_code}")
-        except requests.exceptions.RequestException as e:
-            print(f"Attempt {attempt+1}: Exception {e}")
+                print(f"Attempt {attempt+1}: ไม่พบ XML จาก TMD")
+        except WebDriverException as e:
+            print(f"Attempt {attempt+1}: Selenium error: {e}")
         if attempt < retries - 1:
             print(f"Retrying in {wait_seconds} seconds...")
             time.sleep(wait_seconds)
