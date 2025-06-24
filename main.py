@@ -62,7 +62,7 @@ def fetch_weather_data_with_retry(retries=3, wait_seconds=3):
     url = "https://data.tmd.go.th/api/WeatherToday/V2/?uid=api&ukey=api12345"
     for attempt in range(retries):
         try:
-            response = requests.get(url, timeout=30)
+            response = requests.get(url, timeout=60)
             if response.status_code == 200:
                 return response.content
             else:
