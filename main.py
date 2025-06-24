@@ -12,6 +12,8 @@ from linebot.models import TextSendMessage, MessageEvent, TextMessage
 from linebot.exceptions import InvalidSignatureError
 from dotenv import load_dotenv
 from flask import Flask, request, abort
+from bs4 import BeautifulSoup
+import threading
 
 load_dotenv()
 
@@ -31,8 +33,8 @@ credentials = service_account.Credentials.from_service_account_info(
 
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
-
 app = Flask(__name__)
+user_file_lock = threading.Lock()
 
 
 def get_registered_users():
@@ -43,22 +45,24 @@ def get_registered_users():
 
 
 def register_user(user_id):
-    users = get_registered_users()
-    if user_id not in users:
-        with open(REGISTERED_USER_FILE, "a", encoding="utf-8") as f:
-            f.write(f"{user_id}\n")
-        print(f"User {user_id} registered.")
-    else:
-        print(f"User {user_id} already registered.")
+    with user_file_lock:
+        users = get_registered_users()
+        if user_id not in users:
+            with open(REGISTERED_USER_FILE, "a", encoding="utf-8") as f:
+                f.write(f"{user_id}\n")
+            print(f"User {user_id} registered.")
+        else:
+            print(f"User {user_id} already registered.")
 
 
 def unregister_user(user_id):
-    users = get_registered_users()
-    if user_id in users:
-        users.remove(user_id)
-        with open(REGISTERED_USER_FILE, "w", encoding="utf-8") as f:
-            f.writelines(f"{uid}\n" for uid in users)
-        print(f"User {user_id} unregistered.")
+    with user_file_lock:
+        users = get_registered_users()
+        if user_id in users:
+            users.remove(user_id)
+            with open(REGISTERED_USER_FILE, "w", encoding="utf-8") as f:
+                f.writelines(f"{uid}\n" for uid in users)
+            print(f"User {user_id} unregistered.")
 
 
 def fetch_weather_data():
@@ -68,6 +72,15 @@ def fetch_weather_data():
         return response.content
     else:
         raise Exception(f"Error fetching weather data: {response.status_code}")
+
+
+def clean_and_parse_xml(xml_data):
+    try:
+        soup = BeautifulSoup(xml_data, "xml")
+        cleaned_xml = str(soup)
+        return ET.fromstring(cleaned_xml)
+    except Exception as e:
+        raise Exception(f"Error parsing cleaned XML: {e}")
 
 
 def extract_all_fields(elem, prefix=""):
@@ -85,7 +98,7 @@ def extract_all_fields(elem, prefix=""):
 
 def parse_and_save_csv(xml_data, filename):
     try:
-        root = ET.fromstring(xml_data)
+        root = clean_and_parse_xml(xml_data)
         stations = root.findall(".//Station")
         all_fields = set()
         rows = []
@@ -131,7 +144,7 @@ def send_to_registered_users(message):
 def count_stations_in_weather_data():
     try:
         xml_data = fetch_weather_data()
-        root = ET.fromstring(xml_data)
+        root = clean_and_parse_xml(xml_data)
         stations = root.findall(".//Station")
         return len(stations)
     except Exception as e:
@@ -200,11 +213,12 @@ def health_check():
     return "LINE Bot is running."
 
 
-@app.route("/callback", methods=['POST'])
+@app.route("/callback", methods=['GET', 'POST'])
 def callback():
+    if request.method == "GET":
+        return "OK"
     signature = request.headers['X-Line-Signature']
     body = request.get_data(as_text=True)
-
     try:
         handler.handle(body, signature)
     except InvalidSignatureError:
