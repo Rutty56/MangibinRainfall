@@ -1,5 +1,6 @@
 import json
 import os
+import time
 import requests
 import xml.etree.ElementTree as ET
 import csv
@@ -12,8 +13,6 @@ from linebot.models import TextSendMessage, MessageEvent, TextMessage
 from linebot.exceptions import InvalidSignatureError
 from dotenv import load_dotenv
 from flask import Flask, request, abort
-from bs4 import BeautifulSoup
-import threading
 
 load_dotenv()
 
@@ -33,9 +32,8 @@ credentials = service_account.Credentials.from_service_account_info(
 
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
-app = Flask(__name__)
-user_file_lock = threading.Lock()
 
+app = Flask(__name__)
 
 def get_registered_users():
     if not os.path.exists(REGISTERED_USER_FILE):
@@ -43,45 +41,41 @@ def get_registered_users():
     with open(REGISTERED_USER_FILE, "r", encoding="utf-8") as f:
         return [line.strip() for line in f if line.strip()]
 
-
 def register_user(user_id):
-    with user_file_lock:
-        users = get_registered_users()
-        if user_id not in users:
-            with open(REGISTERED_USER_FILE, "a", encoding="utf-8") as f:
-                f.write(f"{user_id}\n")
-            print(f"User {user_id} registered.")
-        else:
-            print(f"User {user_id} already registered.")
-
+    users = get_registered_users()
+    if user_id not in users:
+        with open(REGISTERED_USER_FILE, "a", encoding="utf-8") as f:
+            f.write(f"{user_id}\n")
+        print(f"User {user_id} registered.")
+    else:
+        print(f"User {user_id} already registered.")
 
 def unregister_user(user_id):
-    with user_file_lock:
-        users = get_registered_users()
-        if user_id in users:
-            users.remove(user_id)
-            with open(REGISTERED_USER_FILE, "w", encoding="utf-8") as f:
-                f.writelines(f"{uid}\n" for uid in users)
-            print(f"User {user_id} unregistered.")
+    users = get_registered_users()
+    if user_id in users:
+        users.remove(user_id)
+        with open(REGISTERED_USER_FILE, "w", encoding="utf-8") as f:
+            f.writelines(f"{uid}\n" for uid in users)
+        print(f"User {user_id} unregistered.")
 
+def fetch_weather_data_with_retry(retries=3, wait_seconds=3):
+    url = "https://data.tmd.go.th/api/WeatherToday/V2/?uid=api&ukey=api12345"
+    for attempt in range(retries):
+        try:
+            response = requests.get(url, timeout=30)
+            if response.status_code == 200:
+                return response.content
+            else:
+                print(f"Attempt {attempt+1}: HTTP {response.status_code}")
+        except requests.exceptions.RequestException as e:
+            print(f"Attempt {attempt+1}: Exception {e}")
+        if attempt < retries - 1:
+            print(f"Retrying in {wait_seconds} seconds...")
+            time.sleep(wait_seconds)
+    raise Exception("Failed to fetch weather data after retries")
 
 def fetch_weather_data():
-    url = "https://data.tmd.go.th/api/WeatherToday/V2/?uid=api&ukey=api12345"
-    response = requests.get(url)
-    if response.status_code == 200:
-        return response.content
-    else:
-        raise Exception(f"Error fetching weather data: {response.status_code}")
-
-
-def clean_and_parse_xml(xml_data):
-    try:
-        soup = BeautifulSoup(xml_data, "xml")
-        cleaned_xml = str(soup)
-        return ET.fromstring(cleaned_xml)
-    except Exception as e:
-        raise Exception(f"Error parsing cleaned XML: {e}")
-
+    return fetch_weather_data_with_retry()
 
 def extract_all_fields(elem, prefix=""):
     data = {}
@@ -95,10 +89,9 @@ def extract_all_fields(elem, prefix=""):
         data.update(extract_all_fields(child, key_prefix))
     return data
 
-
 def parse_and_save_csv(xml_data, filename):
     try:
-        root = clean_and_parse_xml(xml_data)
+        root = ET.fromstring(xml_data)
         stations = root.findall(".//Station")
         all_fields = set()
         rows = []
@@ -119,7 +112,6 @@ def parse_and_save_csv(xml_data, filename):
     except Exception as e:
         raise Exception(f"Error parsing XML data: {e}")
 
-
 def upload_to_drive(filename):
     service = build('drive', 'v3', credentials=credentials)
     file_metadata = {'name': os.path.basename(filename), 'parents': [FOLDER_ID]}
@@ -128,7 +120,6 @@ def upload_to_drive(filename):
     file_id = file.get('id')
     service.permissions().create(fileId=file_id, body={"type": "anyone", "role": "reader"}).execute()
     return f"https://drive.google.com/file/d/{file_id}/view?usp=sharing"
-
 
 def send_to_registered_users(message):
     user_ids = get_registered_users()
@@ -140,17 +131,15 @@ def send_to_registered_users(message):
         except Exception as e:
             print(f"Error sending message to {user_id}: {e}")
 
-
 def count_stations_in_weather_data():
     try:
         xml_data = fetch_weather_data()
-        root = clean_and_parse_xml(xml_data)
+        root = ET.fromstring(xml_data)
         stations = root.findall(".//Station")
         return len(stations)
     except Exception as e:
         print(f"Error counting stations: {e}")
         return None
-
 
 def send_daily_weather_update():
     print("✅ Running scheduled weather update...")
@@ -169,7 +158,6 @@ def send_daily_weather_update():
         if os.path.exists(filename):
             os.remove(filename)
     send_to_registered_users(message)
-
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
@@ -207,24 +195,20 @@ def handle_message(event):
             text="กรุณาพิมพ์คำสั่งที่ถูกต้อง เช่น 'สมัครรับบริการ', 'ยกเลิกสมัคร', 'เช็คข้อมูล', หรือ 'ดึงข้อมูล'"
         ))
 
-
 @app.route("/", methods=["GET"])
 def health_check():
     return "LINE Bot is running."
 
-
-@app.route("/callback", methods=['GET', 'POST'])
+@app.route("/callback", methods=['POST'])
 def callback():
-    if request.method == "GET":
-        return "OK"
     signature = request.headers['X-Line-Signature']
     body = request.get_data(as_text=True)
+
     try:
         handler.handle(body, signature)
     except InvalidSignatureError:
         abort(400)
     return 'OK'
-
 
 @app.route("/trigger-weather", methods=["GET"])
 def trigger_weather():
@@ -232,7 +216,6 @@ def trigger_weather():
         return "❌ Unauthorized", 403
     send_daily_weather_update()
     return "✅ Triggered weather update"
-
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
