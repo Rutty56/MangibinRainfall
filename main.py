@@ -74,7 +74,7 @@ def fetch_weather_data_with_retry(retries=3, wait_seconds=3):
             driver = webdriver.Chrome(options=options)
             driver.set_page_load_timeout(60)
             driver.get(url)
-            time.sleep(5)  # ให้เวลา JS โหลด
+            time.sleep(30)  # ให้เวลา JS โหลด
 
             page_source = driver.page_source
             driver.quit()
